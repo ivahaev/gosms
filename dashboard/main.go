@@ -2,36 +2,29 @@ package main
 
 import (
 	"fmt"
-	"github.com/haxpax/gosms"
-	"github.com/haxpax/gosms/modem"
-	"log"
+	"github.com/ivahaev/gosms"
+	"github.com/ivahaev/gosms/modem"
+	log "github.com/ivahaev/go-logger"
 	"os"
 	"strconv"
 )
 
 func main() {
 
-	log.Println("main: ", "Initializing gosms")
+	log.Info("main: ", "Initializing gosms")
 	//load the config, abort if required config is not preset
 	appConfig, err := gosms.GetConfig("conf.ini")
 	if err != nil {
-		log.Println("main: ", "Invalid config: ", err.Error(), " Aborting")
+		log.Error("main: ", "Invalid config: ", err.Error(), " Aborting")
 		os.Exit(1)
 	}
-
-	db, err := gosms.InitDB("sqlite3", "db.sqlite")
-	if err != nil {
-		log.Println("main: ", "Error initializing database: ", err, " Aborting")
-		os.Exit(1)
-	}
-	defer db.Close()
 
 	serverhost, _ := appConfig.Get("SETTINGS", "SERVERHOST")
 	serverport, _ := appConfig.Get("SETTINGS", "SERVERPORT")
 
 	_numDevices, _ := appConfig.Get("SETTINGS", "DEVICES")
 	numDevices, _ := strconv.Atoi(_numDevices)
-	log.Println("main: number of devices: ", numDevices)
+	log.Info("main: number of devices: ", numDevices)
 
 	var modems []*modem.GSMModem
 	for i := 0; i < numDevices; i++ {
@@ -58,13 +51,13 @@ func main() {
 	_loaderTimeoutLong, _ := appConfig.Get("SETTINGS", "MSGTIMEOUTLONG")
 	loaderTimeoutLong, _ := strconv.Atoi(_loaderTimeoutLong)
 
-	log.Println("main: Initializing worker")
+	log.Info("main: Initializing worker")
 	gosms.InitWorker(modems, bufferSize, bufferLow, loaderTimeout, loaderCountout, loaderTimeoutLong)
 
-	log.Println("main: Initializing server")
+	log.Info("main: Initializing server")
 	err = InitServer(serverhost, serverport)
 	if err != nil {
-		log.Println("main: ", "Error starting server: ", err.Error(), " Aborting")
+		log.Error("main: ", "Error starting server: ", err.Error(), " Aborting")
 		os.Exit(1)
 	}
 }

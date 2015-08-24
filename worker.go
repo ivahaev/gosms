@@ -1,8 +1,8 @@
 package gosms
 
 import (
-	"github.com/haxpax/gosms/modem"
-	"log"
+	"github.com/ivahaev/gosms/modem"
+	log "github.com/ivahaev/go-logger"
 	"strings"
 	"time"
 )
@@ -17,12 +17,14 @@ const (
 )
 
 type SMS struct {
-	UUID    string `json:"uuid"`
-	Mobile  string `json:"mobile"`
-	Body    string `json:"body"`
-	Status  int    `json:"status"`
-	Retries int    `json:"retries"`
-	Device  string `json:"device"`
+	UUID      string    `json:"uuid"`
+	Mobile    string    `json:"mobile"`
+	Body      string    `json:"body"`
+	Status    int       `json:"status"`
+	Retries   int       `json:"retries"`
+	Device    string    `json:"device"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 var messages chan SMS
@@ -37,7 +39,7 @@ var messageLoaderCountout int
 var messageLoaderLongTimeout time.Duration
 
 func InitWorker(modems []*modem.GSMModem, bufferSize, bufferLow, loaderTimeout, countOut, loaderLongTimeout int) {
-	log.Println("--- InitWorker")
+	log.Info("--- InitWorker")
 
 	bufferMaxSize = bufferSize
 	bufferLowCount = bufferLow
@@ -58,7 +60,7 @@ func InitWorker(modems []*modem.GSMModem, bufferSize, bufferLow, loaderTimeout, 
 		modem := modems[i]
 		err := modem.Connect()
 		if err != nil {
-			log.Println("InitWorker: error connecting", modem.DeviceId, err)
+			log.Error("InitWorker: error connecting", modem.DeviceId, err)
 			continue
 		}
 		go processMessages(modem)
@@ -66,9 +68,10 @@ func InitWorker(modems []*modem.GSMModem, bufferSize, bufferLow, loaderTimeout, 
 	go messageLoader(bufferMaxSize, bufferLowCount)
 }
 
-func EnqueueMessage(message *SMS, insertToDB bool) {
-	log.Println("--- EnqueueMessage: ", message)
-	if insertToDB {
+func EnqueueMessage(message *SMS, newMessage bool) {
+	log.Info("--- EnqueueMessage: ", message)
+	if newMessage {
+		log.Info("This is new message. Will insert to DB.")
 		insertMessage(message)
 	}
 	//wakeup message loader and exit
@@ -76,13 +79,13 @@ func EnqueueMessage(message *SMS, insertToDB bool) {
 		//notify the message loader only if its been to too long
 		//or too many messages since last notification
 		messageCountSinceLastWakeup++
-		if messageCountSinceLastWakeup > messageLoaderCountout || time.Now().Sub(timeOfLastWakeup) > messageLoaderTimeout {
-			log.Println("EnqueueMessage: ", "waking up message loader")
+		if newMessage || messageCountSinceLastWakeup > messageLoaderCountout || time.Now().Sub(timeOfLastWakeup) > messageLoaderTimeout {
+			log.Info("EnqueueMessage: ", "waking up message loader")
 			wakeupMessageLoader <- true
 			messageCountSinceLastWakeup = 0
 			timeOfLastWakeup = time.Now()
 		}
-		log.Println("EnqueueMessage - anon: count since last wakeup: ", messageCountSinceLastWakeup)
+		log.Info("EnqueueMessage - anon: count since last wakeup: ", messageCountSinceLastWakeup)
 	}()
 }
 
@@ -102,46 +105,48 @@ func messageLoader(bufferSize, minFill int) {
 			time.Sleep(messageLoaderLongTimeout)
 			timeout <- true
 		}()
-		log.Println("messageLoader: ", "waiting for wakeup call")
+		log.Info("messageLoader: ", "waiting for wakeup call")
 		select {
 		case <-wakeupMessageLoader:
-			log.Println("messageLoader: woken up by channel call")
+			log.Info("messageLoader: woken up by channel call")
 		case <-timeout:
-			log.Println("messageLoader: woken up by timeout")
+			log.Info("messageLoader: woken up by timeout")
 		}
 		if len(messages) >= bufferLowCount {
 			//if we have sufficient number of messages to process,
 			//don't bother hitting the database
-			log.Println("messageLoader: ", "I have sufficient messages")
+			log.Info("messageLoader: ", "I have sufficient messages")
 			continue
 		}
 
 		countToFetch := bufferMaxSize - len(messages)
-		log.Println("messageLoader: ", "I need to fetch more messages", countToFetch)
+		log.Info("messageLoader: ", "I need to fetch more messages", countToFetch)
 		pendingMsgs, err := getPendingMessages(countToFetch)
 		if err == nil {
-			log.Println("messageLoader: ", len(pendingMsgs), " pending messages found")
+			log.Info("messageLoader: ", len(pendingMsgs), " pending messages found")
 			for _, msg := range pendingMsgs {
 				messages <- msg
 			}
+		} else {
+			log.Error(err)
 		}
 	}
 }
 
 func processMessages(modem *modem.GSMModem) {
 	defer func() {
-		log.Println("--- deferring ProcessMessage")
+		log.Info("--- deferring ProcessMessage")
 	}()
 
-	//log.Println("--- ProcessMessage")
+	//log.Info("--- ProcessMessage")
 	for {
 		message := <-messages
-		log.Println("processing: ", message.UUID, modem.DeviceId)
+		log.Info("processing: ", message.UUID, modem.DeviceId)
 
 		status := modem.SendSMS(message.Mobile, message.Body)
-		if strings.HasSuffix(status, "OK\r\n") {
+		if strings.Contains(status, "OK") {
 			message.Status = SMSProcessed
-		} else if strings.HasSuffix(status, "ERROR\r\n") {
+		} else if strings.Contains(status, "ERROR") {
 			message.Status = SMSError
 		} else {
 			message.Status = SMSPending
@@ -156,6 +161,6 @@ func processMessages(modem *modem.GSMModem) {
 			// the queue twice. I don't want that
 			EnqueueMessage(&message, false)
 		}
-		time.Sleep(5 * time.Microsecond)
+		time.Sleep(time.Microsecond * 500)
 	}
 }

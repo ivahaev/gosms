@@ -3,13 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/haxpax/gosms"
+	"github.com/ivahaev/gosms"
 	"github.com/gorilla/mux"
 	"github.com/satori/go.uuid"
 	"html/template"
-	"log"
+	log "github.com/ivahaev/go-logger"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 //reposne structure to /sms
@@ -34,7 +35,7 @@ var templates = template.Must(template.ParseFiles("./templates/index.html"))
 
 // dashboard
 func indexHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("--- indexHandler")
+	log.Info("--- indexHandler")
 	// templates.ExecuteTemplate(w, "index.html", nil)
 	// Use during development to avoid having to restart server
 	// after every change in HTML
@@ -56,22 +57,22 @@ func handleStatic(w http.ResponseWriter, r *http.Request) {
 
 // push sms, allowed methods: POST
 func sendSMSHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("--- sendSMSHandler")
+	log.Info("--- sendSMSHandler")
 	w.Header().Set("Content-type", "application/json")
 
 	//TODO: validation
 	r.ParseForm()
 	mobile := r.FormValue("mobile")
 	message := r.FormValue("message")
-	uuid := uuid.NewV1()
-	sms := &gosms.SMS{UUID: uuid.String(), Mobile: mobile, Body: message, Retries: 0}
+	uuid := uuid.NewV4()
+	sms := &gosms.SMS{UUID: uuid.String(), Mobile: mobile, Body: message, Retries: 0, CreatedAt: time.Now()}
 	gosms.EnqueueMessage(sms, true)
 
 	smsresp := SMSResponse{Status: 200, Message: "ok"}
 	var toWrite []byte
 	toWrite, err := json.Marshal(smsresp)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		//lets just depend on the server to raise 500
 	}
 	w.Write(toWrite)
@@ -79,7 +80,7 @@ func sendSMSHandler(w http.ResponseWriter, r *http.Request) {
 
 // dumps JSON data, used by log view. Methods allowed: GET
 func getLogsHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("--- getLogsHandler")
+	log.Info("--- getLogsHandler")
 	messages, _ := gosms.GetMessages("")
 	summary, _ := gosms.GetStatusSummary()
 	dayCount, _ := gosms.GetLast7DaysMessageCount()
@@ -93,7 +94,7 @@ func getLogsHandler(w http.ResponseWriter, r *http.Request) {
 	var toWrite []byte
 	toWrite, err := json.Marshal(logs)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		//lets just depend on the server to raise 500
 	}
 	w.Header().Set("Content-type", "application/json")
@@ -103,7 +104,7 @@ func getLogsHandler(w http.ResponseWriter, r *http.Request) {
 /* end API handlers */
 
 func InitServer(host string, port string) error {
-	log.Println("--- InitServer ", host, port)
+	log.Info("--- InitServer ", host, port)
 
 	r := mux.NewRouter()
 	r.StrictSlash(true)
@@ -121,7 +122,7 @@ func InitServer(host string, port string) error {
 	http.Handle("/", r)
 
 	bind := fmt.Sprintf("%s:%s", host, port)
-	log.Println("listening on: ", bind)
+	log.Info("listening on: ", bind)
 	return http.ListenAndServe(bind, nil)
 
 }

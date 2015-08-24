@@ -79,24 +79,14 @@ building from source
 
 
 On Ubuntu
-- go get github.com/haxpax/gosms
-- cd $GOPATH/src/github.com/haxpax/gosms/dashboard
+- go get github.com/ivahaev/gosms
+- cd $GOPATH/src/github.com/ivahaev/gosms/dashboard
 - go get
 - go build
 
 On Windows
-- Setup GCC for go-sqlite3 package
-    - For 32 bit
-        - Download MinGW from http://sourceforge.net/projects/mingw/
-        - Add `C:\MinGW\bin` to PATH
-        - run `mingw-get install gcc` from command line
-    - For 64 bit
-        - Download minigw from here : [sourcceforge](http://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win32/Personal%20Builds/mingw-builds/installer/mingw-w64-install.exe/download)
-	- Install
-	- Add its bin dir to path, typically `C:\Program Files\mingw-w64\x86_64-4.9.2-posix-seh-rt_v3-rev1\mingw64\bin`
-
-- go get `github.com/haxpax/gosms`
-- cd $GOPATH/src/github.com/haxpax/gosms/dashboard
+- go get `github.com/ivahaev/gosms`
+- cd $GOPATH/src/github.com/ivahaev/gosms/dashboard
 - go get
 - go build
 
