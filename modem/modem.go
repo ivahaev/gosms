@@ -54,7 +54,6 @@ func (m *GSMModem) SendCommand(command string, waitForOk bool) string {
 			status = string(buf[:n])
 			log.Info("SendCommand: rcvd bytes: ", n, status)
 			if strings.Contains(status, "OK\r\n") || strings.Contains(status, "ERROR\r\n") {
-//			if strings.HasSuffix(status, "OK\r\n") || strings.HasSuffix(status, "ERROR\r\n") {
 				break
 			}
 		}
@@ -98,7 +97,6 @@ func (m *GSMModem) SendPduSMS(mobile string, message string) string {
 	text = "00" + text
 	// EOM CTRL-Z = 26
 	status = m.SendCommand(text+string(26), true)
-	log.Notice("Message status:", status)
 	return status
 
 }
@@ -126,8 +124,8 @@ func (m *GSMModem) SendLongPduSms(mobile string, message string) string {
 		text := string(mes[startByte:stopByte])
 		log.Debug(startByte, stopByte, text)
 		encodedText := pdu.EncodeUcs2ToString(text)
-		textLen := lenInHex(encodedText)
-		text = telNumber + "0008" + udh[i] + textLen + encodedText
+		textLen := lenInHex(udh[i] + encodedText)
+		text = telNumber + "0008" + textLen + udh[i] + encodedText
 		status = m.SendCommand("AT+CMGS="+strconv.Itoa(lenInBytes(text))+"\r", false)
 		log.Debug(status)
 		text = "00" + text
@@ -162,7 +160,7 @@ func createUDH(slices int) []string {
 	IED1 := fmt.Sprintf("%02X", rand.Intn(255))
 	base := "05" + "00" + "03" + IED1 + fmt.Sprintf("%02X", slices)
 	for i := 0; i < slices; i++ {
-		result[i] = base + fmt.Sprintf("%02X", i)
+		result[i] = base + fmt.Sprintf("%02X", i+1)
 	}
 	return result
 }
