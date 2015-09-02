@@ -1,185 +1,129 @@
 package gosms
 
 import (
-	"database/sql"
-	"errors"
-	"fmt"
-	_ "github.com/mattn/go-sqlite3"
-	"log"
-	"os"
+	"encoding/json"
+	"github.com/ivahaev/gosms/sdb"
+	log "github.com/ivahaev/go-logger"
+	"time"
 )
 
-var db *sql.DB
-
-func InitDB(driver, dbname string) (*sql.DB, error) {
-	var err error
-	createDb := false
-	if _, err := os.Stat(dbname); os.IsNotExist(err) {
-		log.Printf("InitDB: database does not exist %s", dbname)
-		createDb = true
-	}
-	db, err = sql.Open(driver, dbname)
-	if createDb {
-		if err = syncDB(); err != nil {
-			return nil, errors.New("Error creating database")
-		}
-	}
-	return db, nil
-}
-
-func syncDB() error {
-	log.Println("--- syncDB")
-	//create messages table
-	createMessages := `CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                uuid char(32) UNIQUE NOT NULL,
-                message char(160)   NOT NULL,
-                mobile   char(15)    NOT NULL,
-                status  INTEGER DEFAULT 0,
-                retries INTEGER DEFAULT 0,
-                device string NULL,
-                created_at TIMESTAMP default CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP
-            );`
-	_, err := db.Exec(createMessages, nil)
-	return err
-}
+var bucket = "sms"
 
 func insertMessage(sms *SMS) error {
-	log.Println("--- insertMessage ", sms)
-	tx, err := db.Begin()
+	log.Info("insertMessage ", sms)
+	err := sdb.Save(bucket, sms.UUID, sms)
 	if err != nil {
-		log.Println("insertMessage: ", err)
-		return err
+		log.Error("Error when inserting message: ", err)
 	}
-	stmt, err := tx.Prepare("INSERT INTO messages(uuid, message, mobile) VALUES(?, ?, ?)")
-	if err != nil {
-		log.Println("insertMessage: ", err)
-		return err
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(sms.UUID, sms.Body, sms.Mobile)
-	if err != nil {
-		log.Println("insertMessage: ", err)
-		return err
-	}
-	tx.Commit()
 	return nil
 }
 
 func updateMessageStatus(sms SMS) error {
-	log.Println("--- updateMessageStatus ", sms)
-	tx, err := db.Begin()
+	log.Info("updateMessageStatus ", sms)
+	encoded, err := sdb.Get(bucket, sms.UUID)
 	if err != nil {
-		log.Println("updateMessageStatus: ", err)
+		log.Error("Error when getting message: ", err)
 		return err
 	}
-	stmt, err := tx.Prepare("UPDATE messages SET status=?, retries=?, device=?, updated_at=DATETIME('now') WHERE uuid=?")
+	oldSms := SMS{}
+	err = json.Unmarshal(encoded, &oldSms)
 	if err != nil {
-		log.Println("updateMessageStatus: ", err)
+		log.Error("Error when unmarshaling message: ", err)
 		return err
 	}
-	defer stmt.Close()
-	_, err = stmt.Exec(sms.Status, sms.Retries, sms.Device, sms.UUID)
+	oldSms.Status = sms.Status
+	oldSms.Retries = sms.Retries
+	oldSms.Device = sms.Device
+	oldSms.UpdatedAt = time.Now()
+	err = sdb.Save(bucket, oldSms.UUID, oldSms)
 	if err != nil {
-		log.Println("updateMessageStatus: ", err)
-		return err
+		log.Error("Error when inserting message: ", err)
 	}
-	tx.Commit()
-	return nil
+	return err
 }
 
-func getPendingMessages(bufferSize int) ([]SMS, error) {
-	log.Println("--- getPendingMessages ")
-	query := fmt.Sprintf("SELECT uuid, message, mobile, status, retries FROM messages WHERE status!=%v AND retries<%v LIMIT %v",
-		SMSProcessed, SMSRetryLimit, bufferSize)
-	log.Println("getPendingMessages: ", query)
-
-	rows, err := db.Query(query)
+func getPendingMessages(bufferSize int) (result []SMS, err error) {
+	log.Info("getPendingMessages ")
+	allMessages, err := sdb.GetAll(bucket)
 	if err != nil {
-		log.Println("getPendingMessages: ", err)
-		return nil, err
+		log.Error(err)
+		return
 	}
-	defer rows.Close()
-
-	var messages []SMS
-
-	for rows.Next() {
+	result = []SMS{}
+	for _, _m := range allMessages {
 		sms := SMS{}
-		rows.Scan(&sms.UUID, &sms.Body, &sms.Mobile, &sms.Status, &sms.Retries)
-		messages = append(messages, sms)
+		err := json.Unmarshal(_m, &sms)
+		if err != nil {
+			log.Error(err)
+			return nil, err
+		}
+		if sms.Status != SMSProcessed && sms.Retries < SMSRetryLimit {
+			result = append(result, sms)
+		}
+		if len(result) >= bufferSize {
+			break
+		}
 	}
-	rows.Close()
-	return messages, nil
+
+	return
 }
 
-func GetMessages(filter string) ([]SMS, error) {
-	/*
-	   expecting filter as empty string or WHERE clauses,
-	   simply append it to the query to get desired set out of database
-	*/
-	log.Println("--- GetMessages")
-	query := fmt.Sprintf("SELECT uuid, message, mobile, status, retries, device FROM messages %v", filter)
-	log.Println("GetMessages: ", query)
-
-	rows, err := db.Query(query)
+func GetMessages(filter string) (result []SMS, err error) {
+	log.Info("GetMessages")
+	allMessages, err := sdb.GetAll(bucket)
 	if err != nil {
-		log.Println("GetMessages: ", err)
-		return nil, err
+		log.Error(err)
+		return
 	}
-	defer rows.Close()
-
-	var messages []SMS
-
-	for rows.Next() {
+	result = []SMS{}
+	for _, _m := range allMessages {
 		sms := SMS{}
-		rows.Scan(&sms.UUID, &sms.Body, &sms.Mobile, &sms.Status, &sms.Retries, &sms.Device)
-		messages = append(messages, sms)
+		err := json.Unmarshal(_m, &sms)
+		if err != nil {
+			log.Error("Error when unmarshaling message: ", err)
+			return nil, err
+		}
+//		if sms.Status != SMSProcessed && sms.Retries < SMSRetryLimit {
+			result = append(result, sms)
+//		}
 	}
-	rows.Close()
-	return messages, nil
+	return result, nil
 }
 
 func GetLast7DaysMessageCount() (map[string]int, error) {
-	log.Println("--- GetLast7DaysMessageCount")
-
-	rows, err := db.Query(`SELECT strftime('%Y-%m-%d', created_at) as datestamp,
-    COUNT(id) as messagecount FROM messages GROUP BY datestamp
-    ORDER BY datestamp DESC LIMIT 7`)
+	log.Info("GetLast7DaysMessageCount")
+	allMessages, err := GetMessages("")
 	if err != nil {
-		log.Println("GetLast7DaysMessageCount: ", err)
+		log.Error(err)
 		return nil, err
 	}
-	defer rows.Close()
-
 	dayCount := make(map[string]int)
-	var day string
-	var count int
-	for rows.Next() {
-		rows.Scan(&day, &count)
-		dayCount[day] = count
+	fromDate := time.Now().Add(-time.Hour * 24 * 8)
+	for _, sms := range allMessages {
+		if sms.CreatedAt.After(fromDate) {
+			createdAt := sms.CreatedAt.Format("2006-01-02")
+			count, ok := dayCount[createdAt]
+			if ok {
+				count++
+			} else {
+				count = 1
+			}
+			dayCount[createdAt] = count
+		}
 	}
-	rows.Close()
 	return dayCount, nil
 }
 
 func GetStatusSummary() ([]int, error) {
-	log.Println("--- GetStatusSummary")
-
-	rows, err := db.Query(`SELECT status, COUNT(id) as messagecount 
-    FROM messages GROUP BY status ORDER BY status`)
+	log.Info("GetStatusSummary")
+	allMessages, err := GetMessages("")
 	if err != nil {
-		log.Println("GetStatusSummary: ", err)
+		log.Error(err)
 		return nil, err
 	}
-	defer rows.Close()
-
-	var status, count int
 	statusSummary := make([]int, 3)
-	for rows.Next() {
-		rows.Scan(&status, &count)
-		statusSummary[status] = count
+	for _, sms := range allMessages {
+		statusSummary[sms.Status]++
 	}
-	rows.Close()
 	return statusSummary, nil
 }
