@@ -19,6 +19,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	db, err := gosms.InitDB("sqlite3", "db.sqlite")
+	if err != nil {
+		log.Info("main: ", "Error initializing database: ", err, " Aborting")
+		os.Exit(1)
+	}
+	defer db.Close()
+
+
 	serverhost, _ := appConfig.Get("SETTINGS", "SERVERHOST")
 	serverport, _ := appConfig.Get("SETTINGS", "SERVERPORT")
 
